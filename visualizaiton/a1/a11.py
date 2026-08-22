@@ -1,10 +1,13 @@
 """Build the organized AT1 Excel workbook for Pacific Smiles Group (PSQ)."""
 
 import csv
+from copy import copy
 from datetime import date, datetime
 from pathlib import Path
 
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
+from openpyxl.cell.cell import MergedCell
+from openpyxl.drawing.image import Image as ExcelImage
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
@@ -14,6 +17,9 @@ DATA_DIR = ROOT / "data"
 PRICE_FILE = DATA_DIR / "pricehistory-dailyadj.csv"
 DIVIDEND_FILE = DATA_DIR / "dividendhistory.csv"
 WORKBOOK_FILE = DATA_DIR / "price_preprocess.xlsx"
+EDA_WORKBOOK_FILE = DATA_DIR / "eda_analysis.xlsx"
+CHART_DIR = ROOT / "report" / "charts_preview"
+BACKTEST_DIR = ROOT / "report" / "backtests"
 
 START_DATE = date(2025, 7, 1)
 END_DATE = date(2026, 6, 30)
@@ -529,6 +535,116 @@ def add_placeholder_sheet(workbook: Workbook, title: str, purpose: str) -> None:
     sheet["A2"].alignment = Alignment(wrap_text=True, vertical="top")
 
 
+def copy_worksheet_content(source_sheet, target_sheet) -> None:
+    """Copy an EDA worksheet into the consolidated submission workbook."""
+    for row in source_sheet.iter_rows():
+        for source_cell in row:
+            if isinstance(source_cell, MergedCell):
+                continue
+            target_cell = target_sheet.cell(
+                source_cell.row, source_cell.column, source_cell.value
+            )
+            if source_cell.has_style:
+                target_cell.font = copy(source_cell.font)
+                target_cell.fill = copy(source_cell.fill)
+                target_cell.border = copy(source_cell.border)
+            if source_cell.number_format:
+                target_cell.number_format = source_cell.number_format
+            if source_cell.alignment:
+                target_cell.alignment = copy(source_cell.alignment)
+            if source_cell.protection:
+                target_cell.protection = copy(source_cell.protection)
+            if source_cell.hyperlink:
+                target_cell._hyperlink = copy(source_cell.hyperlink)
+            if source_cell.comment:
+                target_cell.comment = copy(source_cell.comment)
+
+    for merged_range in source_sheet.merged_cells.ranges:
+        target_sheet.merge_cells(str(merged_range))
+    for column, dimension in source_sheet.column_dimensions.items():
+        target_sheet.column_dimensions[column].width = dimension.width
+        target_sheet.column_dimensions[column].hidden = dimension.hidden
+    for row, dimension in source_sheet.row_dimensions.items():
+        target_sheet.row_dimensions[row].height = dimension.height
+        target_sheet.row_dimensions[row].hidden = dimension.hidden
+    target_sheet.freeze_panes = source_sheet.freeze_panes
+    target_sheet.auto_filter.ref = source_sheet.auto_filter.ref
+
+
+def add_eda_workbook_sheets(workbook: Workbook) -> None:
+    """Embed the completed standalone EDA workbook in the submission workbook."""
+    if not EDA_WORKBOOK_FILE.exists():
+        raise FileNotFoundError(f"EDA workbook not found: {EDA_WORKBOOK_FILE}")
+
+    source_workbook = load_workbook(EDA_WORKBOOK_FILE, data_only=False)
+    for source_sheet in source_workbook.worksheets:
+        if source_sheet.title in workbook.sheetnames:
+            workbook.remove(workbook[source_sheet.title])
+        target_sheet = workbook.create_sheet(source_sheet.title)
+        copy_worksheet_content(source_sheet, target_sheet)
+
+
+def add_charts_sheet(workbook: Workbook) -> None:
+    """Embed all eight required visualisations as images in one Excel sheet."""
+    chart_files = [
+        (
+            "Figure 1 - Close price versus volume",
+            CHART_DIR / "chart_01_close_vs_volume.png",
+        ),
+        ("Figure 2 - OHLC stock movement", CHART_DIR / "kline.png"),
+        (
+            "Figure 3 - Capitalisation versus issued shares",
+            CHART_DIR / "chart_02_capital_vs_shares.png",
+        ),
+        (
+            "Figure 4 - Close price and dividend alternative",
+            CHART_DIR / "chart_03_close_dividend_alternative.png",
+        ),
+        (
+            "Figure 5 - Daily return volatility",
+            CHART_DIR / "chart_04_daily_return_volatility.png",
+        ),
+        (
+            "Figure 6 - $1,000 buy-and-hold portfolio",
+            BACKTEST_DIR / "buy_hold_portfolio.png",
+        ),
+        (
+            "Figure 7 - Single-trade maximum profit",
+            BACKTEST_DIR / "single_trade_max_profit.png",
+        ),
+        (
+            "Figure 8 - Multiple-trade equity",
+            BACKTEST_DIR / "multiple_trades_equity.png",
+        ),
+    ]
+    sheet = workbook.create_sheet("Charts")
+    sheet["A1"] = "PSQ AT1 Visualisations"
+    sheet["A1"].font = Font(size=16, bold=True, color="FFFFFF")
+    sheet["A1"].fill = PatternFill("solid", fgColor="1F4E78")
+    sheet.merge_cells("A1:H1")
+    sheet["A2"] = (
+        "All eight required visualisations are embedded below. Source data and calculations are provided in the other worksheets."
+    )
+    sheet["A2"].alignment = Alignment(wrap_text=True)
+    sheet.merge_cells("A2:H2")
+    sheet.column_dimensions["A"].width = 24
+
+    for index, (caption, chart_file) in enumerate(chart_files):
+        if not chart_file.exists():
+            raise FileNotFoundError(f"Required chart not found: {chart_file}")
+        row = 4 + (index // 2) * 30
+        column = 1 if index % 2 == 0 else 10
+        caption_cell = sheet.cell(row, column, caption)
+        caption_cell.font = Font(bold=True)
+        caption_cell.alignment = Alignment(wrap_text=True)
+        image = ExcelImage(chart_file)
+        image.width = 640
+        image.height = 320
+        sheet.add_image(image, f"{get_column_letter(column)}{row + 1}")
+
+    sheet.freeze_panes = "A4"
+
+
 def add_summary_sheet(
     workbook: Workbook, prices: list[dict[str, object]], dividend_count: int
 ) -> None:
@@ -605,16 +721,52 @@ def main() -> None:
     add_clean_data_sheet(workbook, prices)
     add_eda_sheet(workbook, prices)
     add_calculations_sheet(workbook, prices)
-    add_placeholder_sheet(
-        workbook,
-        "Charts",
-        "Reserved for the eight required visualisations. Charts should be created from Clean_Data and Calculations.",
+    add_charts_sheet(workbook)
+    add_eda_workbook_sheets(workbook)
+    sources = workbook.create_sheet("Sources")
+    sources.append(["Item", "Details"])
+    sources.append(
+        [
+            "Primary source",
+            "DatAnalysis export supplied for Pacific Smiles Group Ltd (ASX: PSQ)",
+        ]
     )
-    add_placeholder_sheet(
-        workbook,
-        "Sources",
-        "Record the DatAnalysis export name, access date, source screenshots and any data verification notes here.",
+    sources.append(["Price source file", "data/pricehistory-dailyadj.csv"])
+    sources.append(["Dividend source file", "data/dividendhistory.csv"])
+    sources.append(["Requested period", "01/07/2025 to 30/06/2026"])
+    sources.append(
+        ["Available period", "01/07/2025 to 05/11/2025; PSQ was acquired and delisted"]
     )
+    sources.append(
+        [
+            "Raw-data treatment",
+            "Raw_Data preserves source OHLC values, including zero values and zero-volume records.",
+        ]
+    )
+    sources.append(
+        [
+            "Cleaning treatment",
+            "Clean_Data replaces zero Open, High and Low values with same-day Close for display calculations and flags the adjustment.",
+        ]
+    )
+    sources.append(
+        [
+            "Missing fields",
+            "Dividend and PE are blank because no usable values are supplied in the source data.",
+        ]
+    )
+    sources.append(
+        [
+            "Embedded analysis",
+            "EDA_Summary, Data_Dictionary, Descriptive_Stats, EDA_Questions and Daily_Analysis were copied from eda_analysis.xlsx.",
+        ]
+    )
+    style_sheet(sources)
+    sources.column_dimensions["A"].width = 28
+    sources.column_dimensions["B"].width = 110
+    for row in sources.iter_rows(min_row=2):
+        row[0].font = Font(bold=True)
+        row[1].alignment = Alignment(wrap_text=True, vertical="top")
     add_summary_sheet(workbook, prices, dividend_count)
     workbook.save(WORKBOOK_FILE)
     print(f"Saved: {WORKBOOK_FILE}")
