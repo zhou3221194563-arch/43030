@@ -12,7 +12,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-ROOT = SCRIPT_DIR.parents[1]
+ROOT = SCRIPT_DIR.parents[2]
 DATA_DIR = ROOT / "data"
 PRICE_FILE = DATA_DIR / "pricehistory-dailyadj.csv"
 DIVIDEND_FILE = DATA_DIR / "dividendhistory.csv"

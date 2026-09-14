@@ -13,7 +13,7 @@ from pathlib import Path
 import finplot as fplt
 import pandas as pd
 
-ROOT = Path(r"D:\code\43030\43030")
+ROOT = Path(__file__).resolve().parents[2]
 CSV = ROOT / "data" / "pricehistory-dailyadj.csv"
 PNG = ROOT / "report" / "kline.png"
 

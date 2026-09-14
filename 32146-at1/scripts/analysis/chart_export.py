@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-ROOT = SCRIPT_DIR.parents[1]
+ROOT = SCRIPT_DIR.parents[2]
 DATA_FILE = ROOT / "data" / "pricehistory-dailyadj.csv"
 OUTPUT_DIR = ROOT / "report" / "charts_preview"
 START_DATE = date(2025, 7, 1)
